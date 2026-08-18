@@ -1,0 +1,72 @@
+# NEAGOLD - despliegue de producción (docker compose)
+# Uso: copiar .env.example a .env, ajustar TODOS los valores (ver sección
+# "Producción" del .env.example) y ejecutar:
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Requiere Docker Compose v2.20+ (condición service_completed_successfully).
+# PostgreSQL no publica puertos: solo es accesible desde la red interna.
+# La API no publica puertos: solo nginx (web) queda expuesto en el 80.
+
+name: neagold-prod
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-neagold}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatorio}
+      POSTGRES_DB: ${POSTGRES_DB:-neagold}
+    volumes:
+      - neagold_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-neagold} -d ${POSTGRES_DB:-neagold}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Migraciones one-shot: se ejecutan una vez antes de arrancar la API.
+  # target 'prisma' del Dockerfile de la API (solo CLI de Prisma).
+  migrate:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+      target: prisma
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL es obligatorio}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+
+volumes:
+  neagold_pgdata:

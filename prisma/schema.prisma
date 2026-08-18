@@ -1,0 +1,701 @@
+// NEAGOLD - Esquema de base de datos
+// PostgreSQL + Prisma 6
+//
+// Convenciones:
+// - PK: UUID v4 (gen_random_uuid nativo de PostgreSQL)
+// - Nombres de columnas: snake_case (mapeados desde camelCase del modelo)
+// - Timestamps: timestamptz(6), UTC
+// - FKs: ON DELETE RESTRICT por defecto (historial inmutable)
+// - Los invariantes de negocio que requieren SQL manual (partial index,
+//   trigger de propiedad única) viven en la migración manual, NO en este archivo.
+
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enumeraciones
+// ---------------------------------------------------------------------------
+
+enum UserStatus {
+  ACTIVE
+  PENDING_VERIFICATION
+  DISABLED
+  LOCKED
+}
+
+enum AuthStage {
+  NONE
+  MFA_PENDING
+  MFA_VERIFIED
+}
+
+enum PieceStatus {
+  IN_STOCK
+  AVAILABLE
+  SOLD
+  IN_SERVICE
+  REPORTED_STOLEN
+  LOST
+  RETIRED
+}
+
+enum IdentityStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum QrStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum TransferStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+  EXPIRED
+}
+
+enum IncidentStatus {
+  ACTIVE
+  UNDER_REVIEW
+  RECOVERED
+  RESOLVED
+  REJECTED
+}
+
+enum IncidentType {
+  STOLEN
+  LOST
+  FRAUD
+  OTHER
+}
+
+enum ReportStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  VERIFIED
+  REJECTED
+}
+
+enum CertificateStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum CertificateType {
+  AUTHENTICITY
+  APPRAISAL
+  MAINTENANCE
+}
+
+enum AcquisitionType {
+  FIRST_REGISTRATION
+  SALE
+  CLAIM
+  TRANSFER
+  RECOVERY
+}
+
+enum ServiceType {
+  CLEANING
+  REPAIR
+  RESIZE
+  COMPONENT_REPLACEMENT
+  INSPECTION
+  OTHER
+}
+
+enum ServiceStatus {
+  REQUESTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ClaimCodeStatus {
+  PENDING
+  USED
+  EXPIRED
+  REVOKED
+}
+
+enum NotificationType {
+  TRANSFER_REQUEST
+  TRANSFER_ACCEPTED
+  TRANSFER_REJECTED
+  PIECE_REPORTED
+  PIECE_RECOVERED
+  CERTIFICATE_ISSUED
+  SERVICE_COMPLETED
+  CLAIM_AVAILABLE
+  SYSTEM
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  DELIVERING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+// ---------------------------------------------------------------------------
+// Identidad y acceso
+// ---------------------------------------------------------------------------
+
+model users {
+  id                  String   @id @default(uuid()) @db.Uuid
+  email               String   @unique @db.VarChar(255)
+  passwordHash        String   @map("password_hash") @db.VarChar(255)
+  firstName           String   @map("first_name") @db.VarChar(120)
+  lastName            String   @map("last_name") @db.VarChar(120)
+  status              UserStatus @default(PENDING_VERIFICATION)
+  authStage           AuthStage @default(NONE) @map("auth_stage")
+  emailVerifiedAt     DateTime? @map("email_verified_at") @db.Timestamptz(6)
+  failedLoginAttempts Int      @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime? @map("locked_until") @db.Timestamptz(6)
+  lastLoginAt         DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  userRoles                user_roles[]
+  sessions                 sessions[]
+  mfa                      mfa?
+  mfaChallenges            mfa_challenges[]
+  passwordResetTokens      password_reset_tokens[]
+  emailVerificationTokens  email_verification_tokens[]
+  ownershipRecords         ownership_records[]        @relation("OwnershipOwner")
+  transfersFrom            ownership_transfers[]       @relation("TransferFrom")
+  transfersTo              ownership_transfers[]       @relation("TransferTo")
+  salesAsBuyer             sales[]                     @relation("SaleBuyer")
+  salesAsSeller            sales[]                     @relation("SaleSeller")
+  certificatesIssued       certificates[]
+  servicesPerformed        service_records[]           @relation("ServicePerformed")
+  servicesRequested        service_records[]           @relation("ServiceRequested")
+  auditLogs                audit_logs[]
+  notifications            notifications[]
+  incidentsReported        incidents[]
+  claimsCreated            piece_claim_codes[]         @relation("ClaimCreated")
+  claimsUsed               piece_claim_codes[]         @relation("ClaimUsed")
+  incidentReportsReported  incident_reports[]
+  piecesRegistered         jewelry_pieces[]
+  webhooks                 webhooks[]
+  idempotencyKeys          idempotency_keys[]
+
+  @@map("users")
+}
+
+model roles {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique @db.VarChar(50)
+  description String?  @db.VarChar(255)
+  isSystem    Boolean  @default(true) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  userRoles        user_roles[]
+  rolePermissions  role_permissions[]
+
+  @@map("roles")
+}
+
+model permissions {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique @db.VarChar(100)
+  description String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  rolePermissions role_permissions[]
+
+  @@map("permissions")
+}
+
+model user_roles {
+  userId    String   @map("user_id") @db.Uuid
+  roleId    String   @map("role_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user users @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role roles @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model role_permissions {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  role       roles       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission permissions @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model sessions {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  refreshTokenHash String   @unique @map("refresh_token_hash") @db.Char(64)
+  familyId         String   @map("family_id") @db.Uuid
+  ipAddress        String?  @map("ip_address") @db.VarChar(45)
+  userAgent        String?  @map("user_agent") @db.VarChar(255)
+  expiresAt        DateTime @map("expires_at") @db.Timestamptz(6)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
+  lastUsedAt       DateTime? @map("last_used_at") @db.Timestamptz(6)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user users @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model mfa {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @unique @map("user_id") @db.Uuid
+  secretEncrypted String    @map("secret_encrypted") @db.VarChar(512)
+  recoveryCodes   String[]  @map("recovery_codes")
+  enabledAt       DateTime  @default(now()) @map("enabled_at") @db.Timestamptz(6)
+  lastVerifiedAt  DateTime? @map("last_verified_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user users @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("mfa")
+}
+
+model mfa_challenges {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  tokenHash   String    @unique @map("token_hash") @db.Char(64)
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
+  attempts    Int       @default(0)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+  usedAt      DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user users @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("mfa_challenges")
+}
+
+model login_attempts {
+  id              String   @id @default(uuid()) @db.Uuid
+  email           String   @db.VarChar(255)
+  ipAddress       String   @map("ip_address") @db.VarChar(45)
+  failedCount     Int      @default(1) @map("failed_count")
+  windowStartedAt DateTime @default(now()) @map("window_started_at") @db.Timestamptz(6)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([email, ipAddress])
+  @@index([email])
+  @@map("login_attempts")
+}
+
+model password_reset_tokens {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user users @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model email_verification_tokens {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user users @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("email_verification_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo y piezas
+// ---------------------------------------------------------------------------
+
+model products {
+  id             String   @id @default(uuid()) @db.Uuid
+  sku            String   @unique @db.VarChar(50)
+  name           String   @db.VarChar(200)
+  description    String?  @db.Text
+  category       String   @db.VarChar(100)
+  basePurity     String   @map("base_purity") @db.VarChar(20)
+  baseWeightGrams Decimal? @map("base_weight_grams") @db.Decimal(10, 3)
+  imageUrl       String?  @map("image_url") @db.VarChar(500)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pieces jewelry_pieces[]
+
+  @@map("products")
+}
+
+model jewelry_pieces {
+  id                String    @id @default(uuid()) @db.Uuid
+  productId         String    @map("product_id") @db.Uuid
+  internalId        String    @unique @map("internal_id") @db.VarChar(50)
+  publicId          String    @unique @map("public_id") @db.VarChar(26)
+  serialNumber      String    @unique @map("serial_number") @db.VarChar(30)
+  weightGrams       Decimal   @map("weight_grams") @db.Decimal(10, 3)
+  purity            String    @db.VarChar(20)
+  material          String    @db.VarChar(50)
+  manufacturingDate DateTime  @map("manufacturing_date") @db.Timestamptz(6)
+  status            PieceStatus @default(IN_STOCK)
+  registeredById    String?   @map("registered_by_id") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product            products              @relation(fields: [productId], references: [id], onDelete: Restrict)
+  registeredBy       users?                @relation(fields: [registeredById], references: [id], onDelete: SetNull)
+  digitalIdentity    digital_identities?
+  qrCodes            qr_codes[]
+  ownershipRecords   ownership_records[]
+  transfers          ownership_transfers[]
+  claimCodes         piece_claim_codes[]
+  certificates       certificates[]
+  incidents          incidents[]
+  serviceRecords     service_records[]
+  sales              sales[]
+
+  @@index([productId])
+  @@index([status])
+  @@map("jewelry_pieces")
+}
+
+model serial_counters {
+  year      Int @id
+  lastValue Int @map("last_value")
+
+  @@map("serial_counters")
+}
+
+// ---------------------------------------------------------------------------
+// Identidad digital y QR
+// ---------------------------------------------------------------------------
+
+model digital_identities {
+  id          String         @id @default(uuid()) @db.Uuid
+  pieceId     String         @unique @map("piece_id") @db.Uuid
+  publicToken String         @unique @map("public_token") @db.Char(64)
+  identityHash String        @map("identity_hash") @db.Char(64)
+  status      IdentityStatus @default(ACTIVE)
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  piece jewelry_pieces @relation(fields: [pieceId], references: [id], onDelete: Restrict)
+
+  @@index([publicToken, status])
+  @@map("digital_identities")
+}
+
+model qr_codes {
+  id            String    @id @default(uuid()) @db.Uuid
+  pieceId       String    @map("piece_id") @db.Uuid
+  token         String    @unique @db.Char(64)
+  status        QrStatus  @default(ACTIVE)
+  generatedBy   String?   @map("generated_by") @db.Uuid
+  generatedAt   DateTime  @default(now()) @map("generated_at") @db.Timestamptz(6)
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedReason String?   @map("revoked_reason") @db.VarChar(255)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  piece jewelry_pieces @relation(fields: [pieceId], references: [id], onDelete: Restrict)
+
+  @@index([pieceId])
+  @@map("qr_codes")
+}
+
+// ---------------------------------------------------------------------------
+// Propiedad y transferencias
+// ---------------------------------------------------------------------------
+
+model ownership_records {
+  id             String         @id @default(uuid()) @db.Uuid
+  pieceId        String         @map("piece_id") @db.Uuid
+  ownerId        String         @map("owner_id") @db.Uuid
+  startDate      DateTime       @map("start_date") @db.Timestamptz(6)
+  endDate        DateTime?      @map("end_date") @db.Timestamptz(6)
+  acquisitionType AcquisitionType @map("acquisition_type")
+  transferId     String?        @map("transfer_id") @db.Uuid
+  createdBy      String?        @map("created_by") @db.Uuid
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  piece    jewelry_pieces @relation(fields: [pieceId], references: [id], onDelete: Restrict)
+  owner    users          @relation("OwnershipOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  transfer ownership_transfers? @relation(fields: [transferId], references: [id], onDelete: Restrict)
+
+  @@index([pieceId, endDate])
+  @@index([ownerId, endDate])
+  @@map("ownership_records")
+}
+
+model ownership_transfers {
+  id          String         @id @default(uuid()) @db.Uuid
+  pieceId     String         @map("piece_id") @db.Uuid
+  fromUserId  String         @map("from_user_id") @db.Uuid
+  toUserId    String         @map("to_user_id") @db.Uuid
+  status      TransferStatus @default(PENDING)
+  expiresAt   DateTime       @map("expires_at") @db.Timestamptz(6)
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  acceptedAt  DateTime?      @map("accepted_at") @db.Timestamptz(6)
+  rejectedAt  DateTime?      @map("rejected_at") @db.Timestamptz(6)
+  cancelledAt DateTime?      @map("cancelled_at") @db.Timestamptz(6)
+
+  piece    jewelry_pieces @relation(fields: [pieceId], references: [id], onDelete: Restrict)
+  fromUser users          @relation("TransferFrom", fields: [fromUserId], references: [id], onDelete: Restrict)
+  toUser   users          @relation("TransferTo", fields: [toUserId], references: [id], onDelete: Restrict)
+  records  ownership_records[]
+
+  @@index([toUserId, status])
+  @@index([pieceId])
+  @@map("ownership_transfers")
+
+  // Invariante: máximo una transferencia PENDING por pieza.
+  // Implementado como partial unique index (migración manual), fuera de Prisma.
+}
+
+model piece_claim_codes {
+  id        String          @id @default(uuid()) @db.Uuid
+  pieceId   String          @map("piece_id") @db.Uuid
+  codeHash  String          @unique @map("code_hash") @db.Char(64)
+  status    ClaimCodeStatus @default(PENDING)
+  expiresAt DateTime        @map("expires_at") @db.Timestamptz(6)
+  createdBy String?         @map("created_by") @db.Uuid
+  usedBy    String?         @map("used_by") @db.Uuid
+  usedAt    DateTime?       @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  piece   jewelry_pieces @relation(fields: [pieceId], references: [id], onDelete: Restrict)
+  creator users?         @relation("ClaimCreated", fields: [createdBy], references: [id], onDelete: SetNull)
+  redeemer users?        @relation("ClaimUsed", fields: [usedBy], references: [id], onDelete: SetNull)
+  sale    sales?         @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  saleId  String?        @unique @map("sale_id") @db.Uuid
+
+  @@index([pieceId])
+  @@map("piece_claim_codes")
+}
+
+// ---------------------------------------------------------------------------
+// Ventas, certificados, incidentes, servicios
+// ---------------------------------------------------------------------------
+
+model sales {
+  id            String   @id @default(uuid()) @db.Uuid
+  pieceId       String   @unique @map("piece_id") @db.Uuid
+  buyerId       String   @map("buyer_id") @db.Uuid
+  soldBy        String   @map("sold_by") @db.Uuid
+  amount        Decimal  @db.Decimal(12, 2)
+  saleDate      DateTime @map("sale_date") @db.Timestamptz(6)
+  invoiceNumber String   @unique @map("invoice_number") @db.VarChar(50)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  piece     jewelry_pieces     @relation(fields: [pieceId], references: [id], onDelete: Restrict)
+  buyer     users              @relation("SaleBuyer", fields: [buyerId], references: [id], onDelete: Restrict)
+  seller    users              @relation("SaleSeller", fields: [soldBy], references: [id], onDelete: Restrict)
+  claimCode piece_claim_codes?
+
+  @@index([buyerId])
+  @@map("sales")
+}
+
+model certificates {
+  id                String            @id @default(uuid()) @db.Uuid
+  pieceId           String            @map("piece_id") @db.Uuid
+  certificateNumber String            @unique @map("certificate_number") @db.VarChar(50)
+  type              CertificateType
+  issuedAt          DateTime          @map("issued_at") @db.Timestamptz(6)
+  issuedBy          String            @map("issued_by") @db.Uuid
+  documentHash      String            @map("document_hash") @db.Char(64)
+  fileUrl           String?           @map("file_url") @db.VarChar(500)
+  status            CertificateStatus @default(ACTIVE)
+  revokedAt         DateTime?         @map("revoked_at") @db.Timestamptz(6)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  piece jewelry_pieces @relation(fields: [pieceId], references: [id], onDelete: Restrict)
+  issuer users         @relation(fields: [issuedBy], references: [id], onDelete: Restrict)
+
+  @@index([pieceId])
+  @@map("certificates")
+}
+
+model incidents {
+  id          String          @id @default(uuid()) @db.Uuid
+  pieceId     String          @map("piece_id") @db.Uuid
+  type        IncidentType
+  status      IncidentStatus  @default(ACTIVE)
+  reportedBy  String          @map("reported_by") @db.Uuid
+  description String?         @db.Text
+  reportedAt  DateTime        @default(now()) @map("reported_at") @db.Timestamptz(6)
+  resolvedAt  DateTime?       @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy  String?         @map("resolved_by") @db.Uuid
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  piece   jewelry_pieces    @relation(fields: [pieceId], references: [id], onDelete: Restrict)
+  reporter users            @relation(fields: [reportedBy], references: [id], onDelete: Restrict)
+  reports  incident_reports[]
+
+  @@index([pieceId, status])
+  @@map("incidents")
+}
+
+model incident_reports {
+  id           String       @id @default(uuid()) @db.Uuid
+  incidentId   String       @map("incident_id") @db.Uuid
+  reportNumber String       @unique @map("report_number") @db.VarChar(50)
+  details      String?      @db.Text
+  status       ReportStatus @default(SUBMITTED)
+  reportedBy   String       @map("reported_by") @db.Uuid
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  incident incidents @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  reporter users     @relation(fields: [reportedBy], references: [id], onDelete: Restrict)
+
+  @@index([incidentId])
+  @@map("incident_reports")
+}
+
+model service_records {
+  id           String        @id @default(uuid()) @db.Uuid
+  pieceId      String        @map("piece_id") @db.Uuid
+  type         ServiceType
+  status       ServiceStatus @default(REQUESTED)
+  requestedBy  String?       @map("requested_by") @db.Uuid
+  performedBy  String?       @map("performed_by") @db.Uuid
+  notes        String?       @db.Text
+  scheduledAt  DateTime?     @map("scheduled_at") @db.Timestamptz(6)
+  completedAt  DateTime?     @map("completed_at") @db.Timestamptz(6)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  piece     jewelry_pieces @relation(fields: [pieceId], references: [id], onDelete: Restrict)
+  requester users?         @relation("ServiceRequested", fields: [requestedBy], references: [id], onDelete: SetNull)
+  performer users?         @relation("ServicePerformed", fields: [performedBy], references: [id], onDelete: SetNull)
+
+  @@index([pieceId])
+  @@map("service_records")
+}
+
+// ---------------------------------------------------------------------------
+// Auditoría, notificaciones, idempotencia
+// ---------------------------------------------------------------------------
+
+model audit_logs {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @map("actor_id") @db.Uuid
+  action     String   @db.VarChar(50)
+  entityType String   @map("entity_type") @db.VarChar(50)
+  entityId   String?  @map("entity_id") @db.VarChar(64)
+  ipAddress  String?  @map("ip_address") @db.VarChar(45)
+  userAgent  String?  @map("user_agent") @db.VarChar(255)
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actor users? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+model notifications {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  type      NotificationType
+  payload   Json             @default("{}")
+  readAt    DateTime?        @map("read_at") @db.Timestamptz(6)
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user users @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+model idempotency_keys {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String?   @map("user_id") @db.Uuid
+  key            String    @db.VarChar(255)
+  requestPath    String    @map("request_path") @db.VarChar(255)
+  responseStatus Int       @map("response_status")
+  responseBody   Json?     @map("response_body")
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user users? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Unicidad (user_id, key, request_path) con NULLS NOT DISTINCT:
+  // implementada como índice único manual en la migración (Prisma 6 no
+  // soporta nullsNotDistinct), igual que los partial indexes del proyecto.
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
+
+// ---------------------------------------------------------------------------
+// Webhooks salientes (integración con sistemas externos)
+// ---------------------------------------------------------------------------
+
+model webhooks {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  url            String    @db.VarChar(500)
+  secret         String    @db.VarChar(64)
+  events         String[]  @default([])
+  isActive       Boolean   @default(true) @map("is_active")
+  failureCount   Int       @default(0) @map("failure_count")
+  lastDeliveryAt DateTime? @map("last_delivery_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user       users                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries webhook_deliveries[]
+
+  @@index([userId])
+  @@map("webhooks")
+}
+
+model webhook_deliveries {
+  id            String                @id @default(uuid()) @db.Uuid
+  webhookId     String                @map("webhook_id") @db.Uuid
+  eventType     String                @map("event_type") @db.VarChar(100)
+  payload       Json                  @default("{}")
+  status        WebhookDeliveryStatus @default(PENDING)
+  statusCode    Int?
+  error         String?               @db.VarChar(500)
+  attempts      Int                   @default(0)
+  nextAttemptAt DateTime?             @map("next_attempt_at") @db.Timestamptz(6)
+  deliveredAt   DateTime?             @map("delivered_at") @db.Timestamptz(6)
+  createdAt     DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  webhook webhooks @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([webhookId, createdAt])
+  @@map("webhook_deliveries")
+}

@@ -1,0 +1,18 @@
+# NEAGOLD - .dockerignore (contexto de build: raíz del monorepo)
+**/node_modules
+**/dist
+**/.git
+.git
+.env
+.env.test
+.env.*.local
+*.log
+logs/
+coverage/
+backups/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+api/dev.err.log
+web/dev.err.log

@@ -1,0 +1,40 @@
+{
+  "name": "neagold",
+  "private": true,
+  "version": "0.1.0",
+  "description": "NEAGOLD - Plataforma de identidad digital y trazabilidad de joyería",
+  "workspaces": [
+    "api",
+    "web"
+  ],
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "scripts": {
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:seed": "prisma db seed",
+    "db:test:migrate": "dotenv -e .env.test -- prisma migrate deploy",
+    "db:test:seed": "dotenv -e .env.test -- prisma db seed",
+    "test:db": "npm run db:test:migrate && dotenv -e .env.test -- vitest run prisma/tests",
+    "test": "npm run test:db",
+    "generate": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^6.19.3",
+    "@prisma/client": "^6.19.0",
+    "argon2": "^0.41.1",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.21.0",
+    "dotenv-cli": "^8.0.0",
+    "prisma": "^6.19.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}
