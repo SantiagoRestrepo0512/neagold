@@ -11,6 +11,13 @@
     "seed": "tsx prisma/seed.ts"
   },
   "scripts": {
+    "generate": "prisma generate",
+    "postinstall": "prisma generate",
+    "build": "npm run build:api && npm run build:web",
+    "build:api": "npm run build -w @neagold/api",
+    "build:web": "npm run build -w @neagold/web",
+    "vercel-build": "npm run generate && npm run build",
+    "vercel:migrate": "prisma migrate deploy",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "db:migrate": "prisma migrate dev",
@@ -19,8 +26,7 @@
     "db:test:migrate": "dotenv -e .env.test -- prisma migrate deploy",
     "db:test:seed": "dotenv -e .env.test -- prisma db seed",
     "test:db": "npm run db:test:migrate && dotenv -e .env.test -- vitest run prisma/tests",
-    "test": "npm run test:db",
-    "generate": "prisma generate"
+    "test": "npm run test:db"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^6.19.3",
@@ -31,10 +37,12 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/pg": "^8.21.0",
+    "@vercel/node": "^5.10.1",
     "dotenv-cli": "^8.0.0",
     "prisma": "^6.19.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",
+    "vercel": "^59.1.4",
     "vitest": "^3.2.0"
   }
 }

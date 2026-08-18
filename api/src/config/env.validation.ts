@@ -23,6 +23,7 @@ export interface EnvConfig {
   emailFrom?: string
   webhookDeliveryTimeoutMs: number
   webhookDeliveryPollMs: number
+  cronSecret?: string
 }
 
 export function validateEnv(config: Record<string, unknown>): EnvConfig {
@@ -141,6 +142,7 @@ export function validateEnv(config: Record<string, unknown>): EnvConfig {
     smtpPass,
     emailFrom,
     webhookDeliveryTimeoutMs: number('WEBHOOK_DELIVERY_TIMEOUT_MS', 5000),
-    webhookDeliveryPollMs: number('WEBHOOK_DELIVERY_POLL_MS', 10000)
+    webhookDeliveryPollMs: number('WEBHOOK_DELIVERY_POLL_MS', 10000),
+    cronSecret: typeof config.CRON_SECRET === 'string' && config.CRON_SECRET.length > 0 ? config.CRON_SECRET : undefined
   }
 }

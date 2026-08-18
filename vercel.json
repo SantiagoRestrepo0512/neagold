@@ -1,0 +1,50 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run vercel-build",
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 60
+    }
+  },
+  "builds": [
+    {
+      "src": "api/index.ts",
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": ["node_modules/.prisma/client/**"]
+      }
+    },
+    {
+      "src": "web/dist/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/index.ts"
+    },
+    {
+      "src": "/verify/(.*)",
+      "dest": "/api/index.ts"
+    },
+    {
+      "src": "/health",
+      "dest": "/api/index.ts"
+    },
+    {
+      "src": "/ready",
+      "dest": "/api/index.ts"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/web/dist/index.html"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/v1/internal/cron/flush-webhooks",
+      "schedule": "0 * * * *"
+    }
+  ]
+}

@@ -18,6 +18,12 @@ export class DeliveryWorker implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
+    // En serverless (Vercel) no hay proceso persistente: el interval no corre
+    // y la cola de reintentos la procesa el endpoint de cron (cron.controller.ts).
+    if (process.env.VERCEL === '1') {
+      this.logger.log('Delivery worker desactivado (entorno serverless; usa el endpoint de cron)')
+      return
+    }
     const pollMs = this.config.get('webhookDeliveryPollMs', { infer: true })
     if (pollMs <= 0) return
     this.timer = setInterval(() => {

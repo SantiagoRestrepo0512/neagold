@@ -34,5 +34,8 @@ Thumbs.db
 # Prisma
 prisma/*.db
 
+# Vercel
+.vercel/
+
 # Backups
 backups/
