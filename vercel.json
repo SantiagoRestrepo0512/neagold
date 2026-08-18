@@ -6,7 +6,11 @@
       "src": "api/index.ts",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["node_modules/.prisma/client/**"]
+        "includeFiles": [
+          "node_modules/.prisma/client/**",
+          "node_modules/@prisma/adapter-pg/**",
+          "node_modules/@prisma/driver-adapter-utils/**"
+        ]
       }
     },
     {

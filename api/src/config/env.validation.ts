@@ -77,13 +77,6 @@ export function validateEnv(config: Record<string, unknown>): EnvConfig {
     if (corsOriginsProd.length === 0) {
       errors.push('CORS_ORIGINS es obligatorio en producción (lista de orígenes permitidos)')
     }
-    const smtpHostProd =
-      typeof config.SMTP_HOST === 'string' && config.SMTP_HOST.length > 0
-        ? config.SMTP_HOST
-        : undefined
-    if (smtpHostProd === undefined) {
-      errors.push('SMTP_HOST es obligatorio en producción (los emails no pueden ir al provider de desarrollo)')
-    }
   }
 
   const verifyOwnerName = String(config.VERIFY_OWNER_NAME ?? '').toLowerCase() === 'true'
